@@ -81,3 +81,14 @@ class SitesFrameworkTests(TestCase):
         self.assertRaises(ValidationError, site.full_clean)
         site.domain = "test\ntest"
         self.assertRaises(ValidationError, site.full_clean)
+
+    @override_settings(SITE_ID='')
+    def test_get_current_site_no_site_id(self):
+        request = HttpRequest()
+        request.META = {
+            "SERVER_NAME": "example.com",
+            "SERVER_PORT": "80",
+        }
+        del settings.SITE_ID
+        site = get_current_site(request)
+        self.assertEqual(site.name, "example.com")
