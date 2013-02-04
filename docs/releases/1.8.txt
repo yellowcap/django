@@ -349,6 +349,12 @@ Miscellaneous
   to work around a bug in IE6 and earlier. This behavior could affect
   performance on IE7 and later. It was removed.
 
+* The current locale is not forced to 'en-us' any longer for management commands.
+  If your custom command does require the language to be set to a particular
+  locale (for example to insert untranslated content in the database), you can
+  make usage of the ``run_as_locale`` decorator to force the locale during the
+  command's execution.
+
 * ``URLField.to_python`` no longer adds a trailing slash to pathless URLs.
 
 * ``django.contrib.gis`` dropped support for GEOS 3.1 and GDAL 1.6.

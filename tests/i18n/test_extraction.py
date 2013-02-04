@@ -191,11 +191,6 @@ class BasicExtractorTests(ExtractorTests):
         self.assertMsgId("I'm on line 97", po_contents)
         self.assertLocationCommentPresent(self.PO_FILE, 97, 'templates', 'test.html')
 
-    def test_force_en_us_locale(self):
-        """Value of locale-munging option used by the command is the right one"""
-        from django.core.management.commands.makemessages import Command
-        self.assertTrue(Command.leave_locale_alone)
-
     def test_extraction_error(self):
         os.chdir(self.test_dir)
         self.assertRaises(SyntaxError, management.call_command, 'makemessages', locale=[LOCALE], extensions=['tpl'], verbosity=0)

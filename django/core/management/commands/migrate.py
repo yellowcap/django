@@ -8,7 +8,7 @@ import traceback
 
 from django.apps import apps
 from django.core.management import call_command
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, run_as_locale
 from django.core.management.color import no_style
 from django.core.management.sql import custom_sql_for_model, emit_post_migrate_signal, emit_pre_migrate_signal
 from django.db import connections, router, transaction, DEFAULT_DB_ALIAS
@@ -39,6 +39,7 @@ class Command(BaseCommand):
         parser.add_argument('--list', '-l', action='store_true', dest='list', default=False,
             help='Show a list of all known migrations and which are applied')
 
+    @run_as_locale('en-us')
     def handle(self, *args, **options):
 
         self.verbosity = options.get('verbosity')

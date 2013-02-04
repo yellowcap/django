@@ -75,6 +75,28 @@ def handle_default_options(options):
         sys.path.insert(0, options.pythonpath)
 
 
+def run_as_locale(locale):
+    """
+    Decorator to force a command to run with a specific locale activated.
+    """
+    def inner(handle_func):
+        def wrapped(*args, **kwargs):
+            from django.utils import translation
+            saved_locale = translation.get_language()
+            if locale != saved_locale:
+                translation.activate(locale)
+            else:
+                saved_locale = None
+            try:
+                res = handle_func(*args, **kwargs)
+            finally:
+                if saved_locale is not None:
+                    translation.activate(saved_locale)
+            return res
+        return wrapped
+    return inner
+
+
 class OutputWrapper(object):
     """
     Wrapper around stdout/stderr
@@ -145,12 +167,6 @@ class BaseCommand(object):
         a list of application names might set this to '<app_label
         app_label ...>'.
 
-    ``can_import_settings``
-        A boolean indicating whether the command needs to be able to
-        import Django settings; if ``True``, ``execute()`` will verify
-        that this is possible before proceeding. Default value is
-        ``True``.
-
     ``help``
         A short description of the command, which will be printed in
         help messages.
@@ -186,24 +202,6 @@ class BaseCommand(object):
         rather than all applications' models, call
         ``self.validate(app_config)`` from ``handle()``, where ``app_config``
         is the application's configuration provided by the app registry.
-
-    ``leave_locale_alone``
-        A boolean indicating whether the locale set in settings should be
-        preserved during the execution of the command instead of being
-        forcibly set to 'en-us'.
-
-        Default value is ``False``.
-
-        Make sure you know what you are doing if you decide to change the value
-        of this option in your custom command if it creates database content
-        that is locale-sensitive and such content shouldn't contain any
-        translations (like it happens e.g. with django.contrim.auth
-        permissions) as making the locale differ from the de facto default
-        'en-us' might cause unintended effects.
-
-        This option can't be False when the can_import_settings option is set
-        to False too because attempting to set the locale needs access to
-        settings. This condition will generate a CommandError.
     """
     # Metadata about this command.
     option_list = ()
@@ -212,9 +210,7 @@ class BaseCommand(object):
 
     # Configuration shortcuts that alter various logic.
     _called_from_command_line = False
-    can_import_settings = True
     output_transaction = False  # Whether to wrap the output in a "BEGIN; COMMIT;"
-    leave_locale_alone = False
 
     # Uncomment the following line of code after deprecation plan for
     # requires_model_validation comes to completion:
@@ -383,47 +379,22 @@ class BaseCommand(object):
         else:
             self.stderr = OutputWrapper(options.get('stderr', sys.stderr), self.style.ERROR)
 
-        if self.can_import_settings:
-            from django.conf import settings  # NOQA
-
-        saved_locale = None
-        if not self.leave_locale_alone:
-            # Only mess with locales if we can assume we have a working
-            # settings file, because django.utils.translation requires settings
-            # (The final saying about whether the i18n machinery is active will be
-            # found in the value of the USE_I18N setting)
-            if not self.can_import_settings:
-                raise CommandError("Incompatible values of 'leave_locale_alone' "
-                                   "(%s) and 'can_import_settings' (%s) command "
-                                   "options." % (self.leave_locale_alone,
-                                                 self.can_import_settings))
-            # Switch to US English, because django-admin.py creates database
-            # content like permissions, and those shouldn't contain any
-            # translations.
-            from django.utils import translation
-            saved_locale = translation.get_language()
-            translation.activate('en-us')
-
-        try:
-            if (self.requires_system_checks and
-                    not options.get('skip_validation') and  # This will be removed at the end of deprecation process for `skip_validation`.
-                    not options.get('skip_checks')):
-                self.check()
-            output = self.handle(*args, **options)
-            if output:
-                if self.output_transaction:
-                    # This needs to be imported here, because it relies on
-                    # settings.
-                    from django.db import connections, DEFAULT_DB_ALIAS
-                    connection = connections[options.get('database', DEFAULT_DB_ALIAS)]
-                    if connection.ops.start_transaction_sql():
-                        self.stdout.write(self.style.SQL_KEYWORD(connection.ops.start_transaction_sql()))
-                self.stdout.write(output)
-                if self.output_transaction:
-                    self.stdout.write('\n' + self.style.SQL_KEYWORD(connection.ops.end_transaction_sql()))
-        finally:
-            if saved_locale is not None:
-                translation.activate(saved_locale)
+        if (self.requires_system_checks and
+                not options.get('skip_validation') and  # This will be removed at the end of deprecation process for `skip_validation`.
+                not options.get('skip_checks')):
+            self.check()
+        output = self.handle(*args, **options)
+        if output:
+            if self.output_transaction:
+                # This needs to be imported here, because it relies on
+                # settings.
+                from django.db import connections, DEFAULT_DB_ALIAS
+                connection = connections[options.get('database', DEFAULT_DB_ALIAS)]
+                if connection.ops.start_transaction_sql():
+                    self.stdout.write(self.style.SQL_KEYWORD(connection.ops.start_transaction_sql()))
+            self.stdout.write(output)
+            if self.output_transaction:
+                self.stdout.write('\n' + self.style.SQL_KEYWORD(connection.ops.end_transaction_sql()))
 
     def validate(self, app_config=None, display_num_errors=False):
         """ Deprecated. Delegates to ``check``."""
