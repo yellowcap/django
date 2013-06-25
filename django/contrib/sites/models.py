@@ -2,11 +2,11 @@ from __future__ import unicode_literals
 
 import string
 
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import models
 from django.db.models.signals import pre_save, pre_delete
 from django.utils.translation import ugettext_lazy as _
 from django.utils.encoding import python_2_unicode_compatible
-from django.core.exceptions import ValidationError
 
 
 SITE_CACHE = {}
@@ -29,6 +29,23 @@ def _simple_domain_name_validator(value):
 
 class SiteManager(models.Manager):
 
+    def _get_site_by_id(self, sid):
+        if not sid in SITE_CACHE:
+            site = self.get(pk=sid)
+            SITE_CACHE[sid] = site
+        return SITE_CACHE[sid]
+
+    def _get_site_by_request(self, request):
+        host = request.get_host().lower()
+        # Strip port and ending dot
+        host = host.split(':', 1)[0] if ':' in host else host
+        host = host[:-1] if host.endswith('.') else host
+
+        if not host in SITE_CACHE:
+            site = self.get(domain__iexact=host)
+            SITE_CACHE[host] = site
+        return SITE_CACHE[host]
+
     def get_current(self):
         """
         Returns the current ``Site`` based on the SITE_ID in the
@@ -39,14 +56,8 @@ class SiteManager(models.Manager):
         try:
             sid = settings.SITE_ID
         except AttributeError:
-            from django.core.exceptions import ImproperlyConfigured
             raise ImproperlyConfigured("You're using the Django \"sites framework\" without having set the SITE_ID setting. Create a site in your database and set the SITE_ID setting to fix this error.")
-        try:
-            current_site = SITE_CACHE[sid]
-        except KeyError:
-            current_site = self.get(pk=sid)
-            SITE_CACHE[sid] = current_site
-        return current_site
+        return self._get_site_by_id(sid)
 
     def clear_cache(self):
         """Clears the ``Site`` object cache."""
@@ -100,7 +111,11 @@ def get_current_site(request):
     ``Site`` object or a ``RequestSite`` object based on the request.
     """
     if Site._meta.installed:
-        current_site = Site.objects.get_current()
+        from django.conf import settings
+        if hasattr(settings, 'SITE_ID'):
+            current_site = Site.objects.get_current()
+        else:
+            current_site = Site.objects._get_site_by_request(request)
     else:
         current_site = RequestSite(request)
     return current_site

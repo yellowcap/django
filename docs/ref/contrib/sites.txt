@@ -20,9 +20,6 @@ The whole sites framework is based on a simple model:
 .. class:: Site
 
     A model for storing the ``domain`` and ``name`` attributes of a Web site.
-    The :setting:`SITE_ID` setting specifies the database ID of the
-    :class:`~django.contrib.sites.models.Site` object associated with that
-    particular settings file.
 
     .. attribute:: domain
 
@@ -32,6 +29,13 @@ The whole sites framework is based on a simple model:
 
         A human-readable "verbose" name for the Web site.
 
+The :setting:`SITE_ID` setting specifies the database ID of the
+:class:`~django.contrib.sites.models.Site` object associated with that
+particular settings file. It is possible to omit it, but then you cannot
+call the :meth:`~django.contrib.sites.models.Site.get_current` method any
+more. The :func:`get_current_site` function will then always try to get the
+current site by comparing the :attr:`~Site.domain` with the host name from the
+:meth:`~django.http.HttpRequest.get_host` method.
 
 How you use this is up to you, but Django uses it in a couple of ways
 automatically via simple conventions.
@@ -277,9 +281,10 @@ Caching the current ``Site`` object
 ===================================
 
 As the current site is stored in the database, each call to
-``Site.objects.get_current()`` could result in a database query. But Django is a
-little cleverer than that: on the first request, the current site is cached, and
-any subsequent call returns the cached data instead of hitting the database.
+``Site.objects.get_current()`` or to ``sites.get_current_site()`` could result
+in a database query. But Django is a little cleverer than that: on the first
+request, the current site is cached, and any subsequent call returns the cached
+data instead of hitting the database.
 
 If for any reason you want to force a database query, you can tell Django to
 clear the cache using ``Site.objects.clear_cache()``::
@@ -309,6 +314,11 @@ application, consider using the helpful
 model(s). It's a model :doc:`manager </topics/db/managers>` that
 automatically filters its queries to include only objects associated
 with the current :class:`~django.contrib.sites.models.Site`.
+
+.. admonition:: Mandatory SITE_ID
+
+    The ``CurrentSiteManager`` is only usable when the :setting:`SITE_ID`
+    setting is defined in your settings.
 
 Use :class:`~django.contrib.sites.managers.CurrentSiteManager` by adding it to
 your model explicitly. For example::
