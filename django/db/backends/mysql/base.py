@@ -1,7 +1,8 @@
 """
 MySQL database backend for Django.
 
-Requires MySQLdb: http://sourceforge.net/projects/mysql-python
+Requires MySQLdb (Python 2): http://sourceforge.net/projects/mysql-python
+or PyMySQL (Python 3): https://github.com/PyMySQL/PyMySQL
 """
 from __future__ import unicode_literals
 
@@ -10,23 +11,38 @@ import re
 import sys
 import warnings
 
-try:
-    import MySQLdb as Database
-except ImportError as e:
-    from django.core.exceptions import ImproperlyConfigured
-    raise ImproperlyConfigured("Error loading MySQLdb module: %s" % e)
+from django.utils import six
 
-# We want version (1, 2, 1, 'final', 2) or later. We can't just use
-# lexicographic ordering in this check because then (1, 2, 1, 'gamma')
-# inadvertently passes the version test.
-version = Database.version_info
-if (version < (1, 2, 1) or (version[:3] == (1, 2, 1) and
-        (len(version) < 5 or version[3] != 'final' or version[4] < 2))):
-    from django.core.exceptions import ImproperlyConfigured
-    raise ImproperlyConfigured("MySQLdb-1.2.1p2 or newer is required; you have %s" % Database.__version__)
+if six.PY2:
+    try:
+        import MySQLdb as Database
+    except ImportError as e:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("Error loading MySQLdb module: %s" % e)
 
-from MySQLdb.converters import conversions, Thing2Literal
-from MySQLdb.constants import FIELD_TYPE, CLIENT
+    # We want version (1, 2, 1, 'final', 2) or later. We can't just use
+    # lexicographic ordering in this check because then (1, 2, 1, 'gamma')
+    # inadvertently passes the version test.
+    version = Database.version_info
+    if (version < (1, 2, 1) or (version[:3] == (1, 2, 1) and
+            (len(version) < 5 or version[3] != 'final' or version[4] < 2))):
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("MySQLdb-1.2.1p2 or newer is required; you have %s" % Database.__version__)
+
+    from MySQLdb.converters import conversions, Thing2Literal
+    from MySQLdb.constants import FIELD_TYPE, CLIENT
+
+else:
+    try:
+        import pymysql as Database
+    except ImportError as e:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("Error loading pymysql module: %s" % e)
+
+    from pymysql.converters import conversions, escape_string
+    from pymysql.constants import FIELD_TYPE, CLIENT
+    def Thing2Literal(value, conv):
+        return escape_string(value)
 
 try:
     import pytz
@@ -59,16 +75,18 @@ IntegrityError = Database.IntegrityError
 parse_datetime = conversions[FIELD_TYPE.DATETIME]
 
 
-def parse_datetime_with_timezone_support(value):
-    dt = parse_datetime(value)
+def parse_datetime_with_timezone_support(*args):
+    # Using *args as MySQLdb and pymsql do not pass the same number of arguments
+    dt = parse_datetime(*args)
     # Confirm that dt is naive before overwriting its tzinfo.
     if dt is not None and settings.USE_TZ and timezone.is_naive(dt):
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
 
 
-def adapt_datetime_with_timezone_support(value, conv):
+def adapt_datetime_with_timezone_support(*args):
     # Equivalent to DateTimeField.get_db_prep_value. Used only by raw SQL.
+    value, conv = args[0], args[-1]
     if settings.USE_TZ:
         if timezone.is_naive(value):
             warnings.warn("MySQL received a naive datetime (%s)"
@@ -79,6 +97,11 @@ def adapt_datetime_with_timezone_support(value, conv):
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return Thing2Literal(value.strftime("%Y-%m-%d %H:%M:%S"), conv)
 
+def decoder(conv_func):
+    # pymysql passes 3 arguments (conn, field, value) while MySQLdb passes
+    # only (value)
+    return lambda *args: conv_func(args[-1].decode('utf-8'))
+
 # MySQLdb-1.2.1 returns TIME columns as timedelta -- they are more like
 # timedelta in terms of actual behavior as they are signed and include days --
 # and Django expects time, so we still need to override that. We also need to
@@ -88,11 +111,10 @@ def adapt_datetime_with_timezone_support(value, conv):
 # timezone support is active, Django expects timezone-aware datetime objects.
 django_conversions = conversions.copy()
 django_conversions.update({
-    FIELD_TYPE.TIME: backend_utils.typecast_time,
-    FIELD_TYPE.DECIMAL: backend_utils.typecast_decimal,
-    FIELD_TYPE.NEWDECIMAL: backend_utils.typecast_decimal,
+    FIELD_TYPE.TIME: decoder(backend_utils.typecast_time),
+    FIELD_TYPE.DECIMAL: decoder(backend_utils.typecast_decimal),
+    FIELD_TYPE.NEWDECIMAL: decoder(backend_utils.typecast_decimal),
     FIELD_TYPE.DATETIME: parse_datetime_with_timezone_support,
-    datetime.datetime: adapt_datetime_with_timezone_support,
 })
 
 # This should match the numerical portion of the version numbers (we can treat
@@ -465,8 +487,10 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     def get_new_connection(self, conn_params):
         conn = Database.connect(**conn_params)
+        conn.encoders[datetime.datetime] = adapt_datetime_with_timezone_support
         conn.encoders[SafeText] = conn.encoders[six.text_type]
-        conn.encoders[SafeBytes] = conn.encoders[bytes]
+        if bytes in conn.encoders:
+            conn.encoders[SafeBytes] = conn.encoders[bytes]
         return conn
 
     def init_connection_state(self):
