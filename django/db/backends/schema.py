@@ -96,7 +96,7 @@ class BaseDatabaseSchemaEditor(object):
         # Log the command we're running, then run it
         logger.debug("%s; (params %r)" % (sql, params))
         if self.collect_sql:
-            self.collected_sql.append((sql % tuple(map(self.quote_value, params))) + ";")
+            self.collected_sql.append((sql % tuple(map(self.quote_value, params or []))) + ";")
         else:
             with self.connection.cursor() as cursor:
                 cursor.execute(sql, params)
@@ -121,17 +121,18 @@ class BaseDatabaseSchemaEditor(object):
         # Work out nullability
         null = field.null
         # If we were told to include a default value, do so
-        default_value = self.effective_default(field)
         include_default = include_default and not self.skip_default(field)
-        if include_default and default_value is not None:
-            if self.connection.features.requires_literal_defaults:
-                # Some databases can't take defaults as a parameter (oracle)
-                # If this is the case, the individual schema backend should
-                # implement prepare_default
-                sql += " DEFAULT %s" % self.prepare_default(default_value)
-            else:
-                sql += " DEFAULT %s"
-                params += [default_value]
+        if include_default:
+            default_value = self.effective_default(field)
+            if default_value is not None:
+                if self.connection.features.requires_literal_defaults:
+                    # Some databases can't take defaults as a parameter (oracle)
+                    # If this is the case, the individual schema backend should
+                    # implement prepare_default
+                    sql += " DEFAULT %s" % self.prepare_default(default_value)
+                else:
+                    sql += " DEFAULT %s"
+                    params += [default_value]
         # Oracle treats the empty string ('') as null, so coerce the null
         # option whenever '' is a possible value.
         if (field.empty_strings_allowed and not field.primary_key and
@@ -224,9 +225,6 @@ class BaseDatabaseSchemaEditor(object):
             if col_type_suffix:
                 definition += " %s" % col_type_suffix
             params.extend(extra_params)
-            # Indexes
-            if field.db_index and not field.unique:
-                self.deferred_sql.append(self._create_index_sql(model, [field], suffix=""))
             # FK
             if field.rel and field.db_constraint:
                 to_table = field.rel.to._meta.db_table
@@ -248,6 +246,7 @@ class BaseDatabaseSchemaEditor(object):
                 autoinc_sql = self.connection.ops.autoinc_sql(model._meta.db_table, field.column)
                 if autoinc_sql:
                     self.deferred_sql.extend(autoinc_sql)
+
         # Add any unique_togethers
         for fields in model._meta.unique_together:
             columns = [model._meta.get_field_by_name(field)[0].column for field in fields]
@@ -259,11 +258,16 @@ class BaseDatabaseSchemaEditor(object):
             "table": self.quote_name(model._meta.db_table),
             "definition": ", ".join(column_sqls)
         }
-        self.execute(sql, params)
-        # Add any index_togethers
-        for field_names in model._meta.index_together:
-            fields = [model._meta.get_field_by_name(field)[0] for field in field_names]
-            self.execute(self._create_index_sql(model, fields, suffix="_idx"))
+        if model._meta.db_tablespace:
+            tablespace_sql = self.connection.ops.tablespace_sql(model._meta.db_tablespace)
+            if tablespace_sql:
+                sql += ' ' + tablespace_sql
+        # Prevent using [] as params, in the case a literal '%' is used in the definition
+        self.execute(sql, params or None)
+
+        # Add any field index and index_togethers (deferred as SQLite3 _remake_table needs it)
+        self.deferred_sql.extend(self._model_indexes_sql(model))
+
         # Make M2M tables
         for field in model._meta.local_many_to_many:
             if field.rel.through._meta.auto_created:
@@ -499,18 +503,12 @@ class BaseDatabaseSchemaEditor(object):
                 rel_fk_names = self._constraint_names(rel.model, [rel.field.column], foreign_key=True)
                 for fk_name in rel_fk_names:
                     self.execute(self._delete_constraint_sql(self.sql_delete_fk, rel.model, fk_name))
-        # Removed an index?
+        # Removed an index? (no strict check, as multiple indexes are possible)
         if (old_field.db_index and not new_field.db_index and
                 not old_field.unique and not
                 (not new_field.unique and old_field.unique)):
             # Find the index for this field
             index_names = self._constraint_names(model, [old_field.column], index=True)
-            if strict and len(index_names) != 1:
-                raise ValueError("Found wrong number (%s) of indexes for %s.%s" % (
-                    len(index_names),
-                    model._meta.db_table,
-                    old_field.column,
-                ))
             for index_name in index_names:
                 self.execute(self._delete_constraint_sql(self.sql_delete_index, model, index_name))
         # Change check constraints?
@@ -800,14 +798,46 @@ class BaseDatabaseSchemaEditor(object):
             index_name = "D%s" % index_name[:-1]
         return index_name
 
-    def _create_index_sql(self, model, fields, suffix=""):
+    def _create_index_sql(self, model, fields, suffix="", sql=None):
+        """
+        Return the SQL statement to create the index for one or several fields.
+        `sql` can be specified if the syntax differs from the standard (GIS
+        indexes, ...).
+        """
+        if len(fields) == 1 and fields[0].db_tablespace:
+            tablespace_sql = self.connection.ops.tablespace_sql(fields[0].db_tablespace)
+        elif model._meta.db_tablespace:
+            tablespace_sql = self.connection.ops.tablespace_sql(model._meta.db_tablespace)
+        else:
+            tablespace_sql = ""
+        if tablespace_sql:
+            tablespace_sql = " " + tablespace_sql
+
         columns = [field.column for field in fields]
-        return self.sql_create_index % {
+        sql_create_index = sql or self.sql_create_index
+        return sql_create_index % {
             "table": self.quote_name(model._meta.db_table),
             "name": self.quote_name(self._create_index_name(model, columns, suffix=suffix)),
             "columns": ", ".join(self.quote_name(column) for column in columns),
-            "extra": "",
+            "extra": tablespace_sql,
         }
+
+    def _model_indexes_sql(self, model):
+        """
+        Return all index SQL statements (field indexes, index_together) for the
+        specified model, as a list.
+        """
+        if not model._meta.managed or model._meta.proxy or model._meta.swapped:
+            return []
+        output = []
+        for field in model._meta.local_fields:
+            if field.db_index and not field.unique:
+                output.append(self._create_index_sql(model, [field], suffix=""))
+
+        for field_names in model._meta.index_together:
+            fields = [model._meta.get_field_by_name(field)[0] for field in field_names]
+            output.append(self._create_index_sql(model, fields, suffix="_idx"))
+        return output
 
     def _create_fk_sql(self, model, field, suffix):
         from_table = model._meta.db_table
