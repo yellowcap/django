@@ -95,13 +95,14 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         # This query retrieves each index on the given table, including the
         # first associated field name
         cursor.execute("""
-            SELECT attr.attname, idx.indkey, idx.indisunique, idx.indisprimary
+            SELECT attr.attname, idx.indkey, idx.indisunique, idx.indisprimary, am.amname
             FROM pg_catalog.pg_class c, pg_catalog.pg_class c2,
-                pg_catalog.pg_index idx, pg_catalog.pg_attribute attr
+                pg_catalog.pg_index idx, pg_catalog.pg_attribute attr, pg_catalog.pg_am am
             WHERE c.oid = idx.indrelid
                 AND idx.indexrelid = c2.oid
                 AND attr.attrelid = c.oid
                 AND attr.attnum = idx.indkey[0]
+                AND am.oid = c2.relam
                 AND c.relname = %s""", [table_name])
         indexes = {}
         for row in cursor.fetchall():
@@ -112,7 +113,8 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             if ' ' in row[1]:
                 continue
             if row[0] not in indexes:
-                indexes[row[0]] = {'primary_key': False, 'unique': False}
+                # Types can be: btree, hash, gist, gin
+                indexes[row[0]] = {'primary_key': False, 'unique': False, 'type': row[4]}
             # It's possible to have the unique and PK constraints in separate indexes.
             if row[3]:
                 indexes[row[0]]['primary_key'] = True

@@ -8,6 +8,8 @@ logger = logging.getLogger('django.contrib.gis')
 
 
 class MySQLGISSchemaEditor(DatabaseSchemaEditor):
+    geom_index_type = 'spatial'
+
     sql_add_spatial_index = 'CREATE SPATIAL INDEX %(index)s ON %(table)s(%(column)s)'
     sql_drop_spatial_index = 'DROP INDEX %(index)s ON %(table)s'
 

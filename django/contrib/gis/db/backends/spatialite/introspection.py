@@ -60,5 +60,5 @@ class SpatiaLiteIntrospection(DatabaseIntrospection):
                        'FROM geometry_columns '
                        'WHERE f_table_name=%s AND spatial_index_enabled=1', (table_name,))
         for row in cursor.fetchall():
-            indexes[row[0]] = {'primary_key': False, 'unique': False}
+            indexes[row[0]] = {'primary_key': False, 'unique': False, 'type': 'rtree'}
         return indexes

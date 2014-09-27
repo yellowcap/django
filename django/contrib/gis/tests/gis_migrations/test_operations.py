@@ -88,6 +88,14 @@ class OperationTests(TransactionTestCase):
                 indexes = connection.introspection.get_indexes(cursor, "gis_neighborhood")
             self.assertIn('path', indexes)
 
+        # Test presence of spatial index.
+        with connection.schema_editor() as editor:
+            if hasattr(editor, 'geom_index_type'):
+                with connection.cursor() as cursor:
+                    indexes = connection.introspection.get_indexes(cursor, "gis_neighborhood")
+                self.assertIn('path', indexes)
+                self.assertEqual(indexes['path']['type'].lower(), editor.geom_index_type.lower())
+
     def test_remove_gis_field(self):
         """
         Tests the RemoveField operation with a GIS-enabled column.

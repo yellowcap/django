@@ -119,7 +119,8 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             if row[2] in multicol_indexes:
                 continue
             if row[4] not in indexes:
-                indexes[row[4]] = {'primary_key': False, 'unique': False}
+                # index types can be: BTREE, FULLTEXT, HASH, RTREE, SPATIAL
+                indexes[row[4]] = {'primary_key': False, 'unique': False, 'type': row[10]}
             # It's possible to have the unique and PK constraints in separate indexes.
             if row[2] == 'PRIMARY':
                 indexes[row[4]]['primary_key'] = True

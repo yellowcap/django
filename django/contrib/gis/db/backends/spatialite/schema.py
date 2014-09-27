@@ -3,6 +3,8 @@ from django.db.backends.sqlite3.schema import DatabaseSchemaEditor
 
 
 class SpatialiteSchemaEditor(DatabaseSchemaEditor):
+    geom_index_type = 'rtree'
+
     sql_add_geometry_column = (
         "SELECT AddGeometryColumn(%(table)s, %(column)s, %(srid)s, "
         "%(geom_type)s, %(dim)s, %(null)s)"

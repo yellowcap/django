@@ -180,7 +180,7 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 continue
             name = info[0][2]  # seqno, cid, name
             indexes[name] = {'primary_key': indexes.get(name, {}).get("primary_key", False),
-                             'unique': unique}
+                             'unique': unique, 'type': 'btree'}
         return indexes
 
     def get_primary_key_column(self, cursor, table_name):
