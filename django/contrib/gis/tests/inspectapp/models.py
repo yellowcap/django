@@ -17,3 +17,14 @@ class AllOGRFields(models.Model):
 
     class Meta:
         app_label = 'inspectapp'
+
+
+class Fields3D(models.Model):
+    point = models.PointField(dim=3)
+    line = models.LineStringField(dim=3)
+    poly = models.PolygonField(dim=3)
+
+    objects = models.GeoManager()
+
+    class Meta:
+        app_label = 'inspectapp'
