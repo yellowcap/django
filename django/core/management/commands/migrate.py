@@ -198,14 +198,17 @@ class Command(BaseCommand):
 
     def migration_progress_callback(self, action, migration, fake=False):
         if self.verbosity >= 1:
+            import time
             if action == "apply_start":
+                self.start = time.time()
                 self.stdout.write("  Applying %s..." % migration, ending="")
                 self.stdout.flush()
             elif action == "apply_success":
+                elapsed = time.time() - self.start
                 if fake:
-                    self.stdout.write(self.style.MIGRATE_SUCCESS(" FAKED"))
+                    self.stdout.write(self.style.MIGRATE_SUCCESS(" FAKED (%s)" % elapsed))
                 else:
-                    self.stdout.write(self.style.MIGRATE_SUCCESS(" OK"))
+                    self.stdout.write(self.style.MIGRATE_SUCCESS(" OK (%s)" % elapsed))
             elif action == "unapply_start":
                 self.stdout.write("  Unapplying %s..." % migration, ending="")
                 self.stdout.flush()
