@@ -1,4 +1,6 @@
 from __future__ import unicode_literals
+from collections import OrderedDict
+import copy
 
 from django.apps import AppConfig
 from django.apps.registry import Apps, apps as global_apps
@@ -29,15 +31,53 @@ class ProjectState(object):
         # Apps to include from main registry, usually unmigrated ones
         self.real_apps = real_apps or []
 
-    def add_model_state(self, model_state):
-        self.models[(model_state.app_label, model_state.name.lower())] = model_state
+    def add_model(self, model_state):
+        app_label, model_name = model_state.app_label, model_state.name.lower()
+        self.models[(app_label, model_name)] = model_state
+        if 'apps' in self.__dict__:  # hasattr would cache the property
+            self.reload_model(app_label, model_name)
+
+    def remove_model(self, app_label, model_name):
+        del self.models[app_label, model_name.lower()]
+        if 'apps' in self.__dict__:
+            del self.apps.all_models[app_label][model_name.lower()]
+            # FIXME: also delete model in app_configs?
+
+    def reload_model(self, app_label, model_name):
+        if 'apps' in self.__dict__:
+            # Get relations before reloading the models, as _meta.apps may change
+            try:
+                related_old = {
+                    f.model for f in
+                    self.apps.get_model(app_label, model_name)._meta.get_all_related_objects()}
+            except LookupError:
+                related_old = set()
+            self._reload_one_model(app_label, model_name)
+            # Reload models if there are relations
+            model = self.apps.get_model(app_label, model_name)
+            related_m2m = {f.rel.to for f, _ in model._meta.get_m2m_with_model()}
+            for rel_model in related_old.union(related_m2m):
+                self._reload_one_model(rel_model._meta.app_label, rel_model._meta.model_name)
+            if related_m2m:
+                # Re-render this model after related models have been reloaded
+                self._reload_one_model(app_label, model_name)
+
+    def _reload_one_model(self, app_label, model_name):
+        try:
+            del self.apps.all_models[app_label][model_name.lower()]
+        except KeyError:
+            pass
+        self.models[app_label, model_name].render(self.apps)
 
     def clone(self):
         "Returns an exact copy of this ProjectState"
-        return ProjectState(
+        new_state = ProjectState(
             models=dict((k, v.clone()) for k, v in self.models.items()),
             real_apps=self.real_apps,
         )
+        if 'apps' in self.__dict__:
+            new_state.apps = self.apps.clone()
+        return new_state
 
     @cached_property
     def apps(self):
@@ -141,6 +181,22 @@ class StateApps(Apps):
                     raise ValueError(msg.format(field=operations[0][1], model=lookup_model))
                 else:
                     do_pending_lookups(model)
+
+    def clone(self):
+        """
+        Return a clone of this registry, mainly used by the migration framework.
+        """
+        clone = StateApps([], {})
+        clone.all_models = copy.deepcopy(self.all_models)
+        clone.app_configs = copy.deepcopy(self.app_configs)
+        return clone
+
+    def register_model(self, app_label, model):
+        if app_label not in self.app_configs:
+            self.app_configs[app_label] = AppConfigStub(app_label)
+            self.app_configs[app_label].models = OrderedDict()
+        super(StateApps, self).register_model(app_label, model)
+        self.app_configs[app_label].models[model._meta.model_name] = model
 
 
 class ModelState(object):
@@ -317,7 +373,7 @@ class ModelState(object):
         body = dict(self.construct_fields())
         body['Meta'] = meta
         body['__module__'] = "__fake__"
-        # Then, make a Model object
+        # Then, make a Model object (apps.register_model is called in __new__)
         return type(
             str(self.name),
             bases,
