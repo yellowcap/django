@@ -3,16 +3,15 @@ from __future__ import unicode_literals
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.http import HttpRequest
-from django.test import TestCase, modify_settings, override_settings
+from django.test import TestCase, override_settings
 
-from . import models
-from .middleware import CurrentSiteMiddleware
-from .models import clear_site_cache, Site
-from .requests import RequestSite
-from .shortcuts import get_current_site
+from .. import models
+from ..middleware import CurrentSiteMiddleware
+from ..models import clear_site_cache, Site
+from ..requests import RequestSite
+from ..shortcuts import get_current_site
 
 
-@modify_settings(INSTALLED_APPS={'append': 'django.contrib.sites'})
 class SitesFrameworkTests(TestCase):
 
     def setUp(self):

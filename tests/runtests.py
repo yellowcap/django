@@ -63,7 +63,7 @@ def get_test_modules():
     modules = []
     discovery_paths = [
         (None, RUNTESTS_DIR),
-        (CONTRIB_MODULE_PATH, CONTRIB_DIR)
+        (CONTRIB_MODULE_PATH, CONTRIB_DIR),
     ]
     if connection.features.gis_enabled:
         discovery_paths.append(
@@ -81,6 +81,7 @@ def get_test_modules():
             if not connection.vendor == 'postgresql' and f == 'postgres_tests' or f == 'postgres':
                 continue
             modules.append((modpath, f))
+    modules.append(('django.contrib.sites', 'tests'))
     return modules
 
 

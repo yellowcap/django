@@ -1,4 +1,3 @@
-from django.apps import apps
 from django.conf import settings
 from django.contrib.sites.managers import CurrentSiteManager
 from django.contrib.sites.models import Site
@@ -10,17 +9,10 @@ from .models import (SyndicatedArticle, ExclusiveArticle, CustomArticle,
     AbstractArticle)
 
 
-class SitesFrameworkTestCase(TestCase):
+class SitesRelationsTests(TestCase):
     def setUp(self):
         Site.objects.get_or_create(id=settings.SITE_ID, domain="example.com", name="example.com")
         Site.objects.create(id=settings.SITE_ID + 1, domain="example2.com", name="example2.com")
-
-        self._old_models = apps.app_configs['sites_framework'].models.copy()
-
-    def tearDown(self):
-        apps.app_configs['sites_framework'].models = self._old_models
-        apps.all_models['sites_framework'] = self._old_models
-        apps.clear_cache()
 
     def test_site_fk(self):
         article = ExclusiveArticle.objects.create(title="Breaking News!", site_id=settings.SITE_ID)
