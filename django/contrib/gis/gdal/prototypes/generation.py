@@ -2,7 +2,7 @@
  This module contains functions that generate ctypes prototypes for the
  GDAL routines.
 """
-
+from functools import partial
 from ctypes import c_char_p, c_double, c_int, c_void_p
 from django.contrib.gis.gdal.prototypes.errcheck import (
     check_arg_errcode, check_errcode, check_geom, check_geom_offset,
@@ -18,9 +18,7 @@ def double_output(func, argtypes, errcheck=False, strarg=False, cpl=False):
     func.argtypes = argtypes
     func.restype = c_double
     if errcheck:
-        def _check_arg_errcode(result, func, cargs):
-            return check_arg_errcode(result, func, cargs, cpl=cpl)
-        func.errcheck = _check_arg_errcode
+        func.errcheck = partial(check_arg_errcode, cpl=cpl)
     if strarg:
         func.errcheck = check_str_arg
     return func
@@ -124,10 +122,8 @@ def void_output(func, argtypes, errcheck=True, cpl=False):
     if errcheck:
         # `errcheck` keyword may be set to False for routines that
         # return void, rather than a status code.
-        def _check_errcode(result, func, cargs):
-            return check_errcode(result, func, cargs, cpl=cpl)
         func.restype = c_int
-        func.errcheck = _check_errcode
+        func.errcheck = partial(check_errcode, cpl=cpl)
     else:
         func.restype = None
 

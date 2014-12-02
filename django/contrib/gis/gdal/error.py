@@ -44,7 +44,6 @@ OGRERR_NONE = 0
 
 # CPL Error Codes
 # http://www.gdal.org/cpl__error_8h.html
-
 CPLERR_DICT = {
     1: (GDALException, 'AppDefined'),
     2: (GDALException, 'OutOfMemory'),
